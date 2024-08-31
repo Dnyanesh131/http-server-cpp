@@ -70,35 +70,37 @@ int main(int argc, char **argv) {
         }
 
         // Extract the User-Agent header
-        std::string user_agent;
-        size_t user_agent_pos = request.find("User-Agent: ");
-        if (user_agent_pos != std::string::npos) {
-            size_t user_agent_end = request.find("\r\n", user_agent_pos);
-            if (user_agent_end != std::string::npos) {
-                user_agent = request.substr(user_agent_pos + 12, user_agent_end - (user_agent_pos + 12));
-            }
-        }
+        
 
-        std::string response;
-        std::string body;
+      
 
-        if (method == "GET" && path == "/user-agent") {
-            // Return the User-Agent header in the response body
-            body = user_agent;
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        } else if (method == "GET" && path == "/") {
-            // Root path
-            body = "Hello, World!";
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        } else {
-            // Invalid path
-            body = "404 Not Found";
-            response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        }
-
-        send(client, response.c_str(), response.length(), 0);
-        close(client);
+       if (method == "GET" && path == "/user-agent") {
+    // Extract the User-Agent header
+    size_t user_agent_pos = request.find("User-Agent: ");
+    if (user_agent_pos != std::string::npos) {
+        size_t user_agent_end = request.find("\r\n", user_agent_pos);
+        std::string user_agent = request.substr(user_agent_pos + 12, user_agent_end - (user_agent_pos + 12));
+        
+        // Form the response with the User-Agent content
+        std::string response_body = user_agent + "\r\n";
+        std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+                              + std::to_string(response_body.size()) + "\r\n\r\n" + response_body;
+        
+        send(client, response.c_str(), response.size(), 0);
     }
+} else if (method == "GET" && path == "/") {
+    // Respond to the root path
+    std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
+    send(client, response.c_str(), response.size(), 0);
+} else {
+    // Handle unknown paths
+    std::string response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+    send(client, response.c_str(), response.size(), 0);
+}
+
+
+        
+    
 
     close(server_fd);
     return 0;
