@@ -57,21 +57,38 @@ int main(int argc, char **argv) {
         std::string request(buffer);
         std::cout << "Received request: " << request << std::endl;
 
-        // Extract User-Agent value
-        std::string user_agent = "";
-        size_t user_agent_pos = request.find("User-Agent: ");
-        if (user_agent_pos != std::string::npos) {
-            size_t user_agent_end = request.find("\r\n", user_agent_pos);
-            if (user_agent_end != std::string::npos) {
-                // Correctly extract the User-Agent string
-                user_agent = request.substr(user_agent_pos + 12, user_agent_end - (user_agent_pos + 12));
+        // Extract the HTTP method and path
+        std::string method, path;
+        size_t method_end = request.find(' ');
+        if (method_end != std::string::npos) {
+            method = request.substr(0, method_end);
+            size_t path_start = method_end + 1;
+            size_t path_end = request.find(' ', path_start);
+            if (path_end != std::string::npos) {
+                path = request.substr(path_start, path_end - path_start);
             }
         }
 
-        // Prepare HTTP response
-        std::string response_body = user_agent;
-        std::string response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-                               + std::to_string(response_body.size()) + "\r\n\r\n" + response_body;
+        // Extract the User-Agent header
+        std::string user_agent;
+        size_t user_agent_start = request.find("User-Agent: ");
+        if (user_agent_start != std::string::npos) {
+            user_agent_start += 12; // Length of "User-Agent: "
+            size_t user_agent_end = request.find("\r\n", user_agent_start);
+            if (user_agent_end != std::string::npos) {
+                user_agent = request.substr(user_agent_start, user_agent_end - user_agent_start);
+            }
+        }
+
+        std::string response;
+        if (method == "GET" && path == "/user-agent") {
+            // Valid /user-agent path
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
+                        + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
+        } else {
+            // Invalid path or method
+            response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
+        }
 
         send(client, response.c_str(), response.size(), 0);
         close(client);
