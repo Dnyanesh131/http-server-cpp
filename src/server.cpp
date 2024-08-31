@@ -1,10 +1,17 @@
-#include "httpServer.h"
-#include <cstring>
+#include <cstddef>
 #include <iostream>
-#include <sys/epoll.h>
+#include <sstream>
+#include <fstream>
+#include <cstdlib>
+#include <map>
+#include <string>
+#include <cstring>
 #include <unistd.h>
-#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/epoll.h>
 
 void httpServer::sendToClient(int client_fd, const char *msg, int msg_size)
 {
