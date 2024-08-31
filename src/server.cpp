@@ -9,8 +9,12 @@
 #include <netdb.h>
 #include <vector>
 #include <sstream>
-#include <thread> // Include thread library
-#include <algorithm> // For std::remove_if
+#include <thread>
+#include <fstream>
+#include <sys/stat.h>
+#include <filesystem> // C++17 for filesystem support
+
+namespace fs = std::filesystem;
 
 // Function to split a message based on a delimiter
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
@@ -50,7 +54,7 @@ std::string get_user_agent(const std::string &request) {
 }
 
 // Function to handle client requests
-void handle_client(int client_fd) {
+void handle_client(int client_fd, const std::string &directory) {
     char buffer[1024] = {0};
     int ret = read(client_fd, buffer, sizeof(buffer));
     if (ret < 0) {
@@ -73,6 +77,30 @@ void handle_client(int client_fd) {
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
         } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+        } else if (split_paths.size() > 1 && split_paths[1] == "files") {
+            // Handle file requests
+            std::string filename = split_paths[2]; // Get the filename
+            fs::path file_path = fs::path(directory) / filename; // Construct the full path
+
+            // Check if the file exists
+            if (fs::exists(file_path) && fs::is_regular_file(file_path)) {
+                std::ifstream file(file_path, std::ios::binary);
+                if (file) {
+                    // Get the file size
+                    file.seekg(0, std::ios::end);
+                    std::streamsize size = file.tellg();
+                    file.seekg(0, std::ios::beg);
+
+                    // Read the file content
+                    std::string file_content(size, '\0');
+                    if (file.read(&file_content[0], size)) {
+                        response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n" + file_content;
+                    }
+                }
+            } else {
+                // File not found
+                response = "HTTP/1.1 404 Not Found\r\n\r\n";
+            }
         } else {
             response = "HTTP/1.1 404 Not Found\r\n\r\n";
         }
@@ -85,6 +113,11 @@ void handle_client(int client_fd) {
 }
 
 int main(int argc, char **argv) {
+    std::string directory = "."; // Default directory
+    if (argc > 2 && std::string(argv[1]) == "--directory") {
+        directory = argv[2]; // Get the directory from command line
+    }
+
     std::cout << "Logs from your program will appear here!\n";
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
@@ -130,7 +163,7 @@ int main(int argc, char **argv) {
         std::cout << "Client connected\n";
 
         // Create a new thread to handle the client request
-        std::thread(handle_client, client_fd).detach(); // Detach the thread to allow concurrent handling
+        std::thread(handle_client, client_fd, directory).detach(); // Detach the thread to allow concurrent handling
     }
 
     close(server_fd);
