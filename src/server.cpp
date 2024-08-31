@@ -69,7 +69,8 @@ int main(int argc, char **argv) {
             }
         }
 
-         std::string user_agent;
+        // Extract the User-Agent header
+        std::string user_agent;
         size_t user_agent_pos = request.find("User-Agent: ");
         if (user_agent_pos != std::string::npos) {
             size_t user_agent_end = request.find("\r\n", user_agent_pos);
@@ -80,10 +81,10 @@ int main(int argc, char **argv) {
 
         std::string response;
         std::string body;
-        if (method == "GET" && path=="/user-agent") {
-            // Extract the string after /echo/
-            // 6 is the length of "/echo/"
-            body =user-agent;
+
+        if (method == "GET" && path == "/user-agent") {
+            // Return the User-Agent header in the response body
+            body = user_agent;
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         } else if (method == "GET" && path == "/") {
             // Root path
