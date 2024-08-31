@@ -69,12 +69,21 @@ int main(int argc, char **argv) {
             }
         }
 
+         std::string user_agent;
+        size_t user_agent_pos = request.find("User-Agent: ");
+        if (user_agent_pos != std::string::npos) {
+            size_t user_agent_end = request.find("\r\n", user_agent_pos);
+            if (user_agent_end != std::string::npos) {
+                user_agent = request.substr(user_agent_pos + 12, user_agent_end - (user_agent_pos + 12));
+            }
+        }
+
         std::string response;
         std::string body;
-        if (method == "GET" && path.find("/echo/") == 0) {
+        if (method == "GET" && path.find("/user-agent") == 0) {
             // Extract the string after /echo/
-            std::string echo_str = path.substr(6); // 6 is the length of "/echo/"
-            body = echo_str;
+            // 6 is the length of "/echo/"
+            body =user-agent;
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         } else if (method == "GET" && path == "/") {
             // Root path
