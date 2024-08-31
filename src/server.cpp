@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <vector>
 #include <sstream>
+#include <algorithm> // For std::remove_if
 
 // Function to split a message based on a delimiter
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
@@ -29,12 +30,19 @@ std::string get_path(const std::string &request) {
     return path_toks[1];
 }
 
+// Function to trim whitespace from both ends of a string
+std::string trim(const std::string &str) {
+    size_t first = str.find_first_not_of(" \t");
+    size_t last = str.find_last_not_of(" \t");
+    return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
+}
+
 // Function to extract the User-Agent header from the request
 std::string get_user_agent(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
         if (line.find("User-Agent:") == 0) {
-            return line.substr(strlen("User-Agent:"));
+            return trim(line.substr(strlen("User-Agent:"))); // Trim whitespace
         }
     }
     return ""; // Return empty if User-Agent is not found
