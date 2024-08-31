@@ -1,11 +1,24 @@
 #include <iostream>
 #include <string>
+#include <unordered_map>
 #include <cstring>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+
+// Assuming you have some utility functions and classes
+namespace httpResponse {
+    std::string _200() {
+        // Generates the base response for HTTP 200 OK
+        return "HTTP/1.1 200 OK\r\n";
+    }
+}
+
+void sendToClient(int client_fd, const char* data, size_t size) {
+    send(client_fd, data, size, 0);
+}
 
 int main(int argc, char **argv) {
     std::cout << std::unitbuf; // Flush after every std::cout / std::cerr
@@ -45,53 +58,79 @@ int main(int argc, char **argv) {
     std::cout << "Waiting for a client to connect...\n";
 
     while (true) {
-        int client = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client < 0) {
+        int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+        if (client_fd < 0) {
             std::cerr << "accept failed\n";
             return 1;
         }
 
         char buffer[1024] = {0};
-        read(client, buffer, sizeof(buffer) - 1);
+        ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
+        if (bytes_read < 0) {
+            std::cerr << "read failed\n";
+            close(client_fd);
+            continue;
+        }
 
+        buffer[bytes_read] = '\0'; // Null-terminate the string
         std::string request(buffer);
         std::cout << "Received request: " << request << std::endl;
 
-        // Extract the HTTP method and path
-        std::string method, path;
+        // Extract the HTTP method, URL, and headers
+        std::string method, url;
+        std::unordered_map<std::string, std::string> headers;
+
         size_t method_end = request.find(' ');
         if (method_end != std::string::npos) {
             method = request.substr(0, method_end);
-            size_t path_start = method_end + 1;
-            size_t path_end = request.find(' ', path_start);
-            if (path_end != std::string::npos) {
-                path = request.substr(path_start, path_end - path_start);
+            size_t url_start = method_end + 1;
+            size_t url_end = request.find(' ', url_start);
+            if (url_end != std::string::npos) {
+                url = request.substr(url_start, url_end - url_start);
+            }
+
+            // Extract headers
+            size_t headers_start = request.find("\r\n") + 2;
+            size_t headers_end = request.find("\r\n\r\n", headers_start);
+            if (headers_end != std::string::npos) {
+                std::string header_section = request.substr(headers_start, headers_end - headers_start);
+                size_t pos = 0;
+                while ((pos = header_section.find("\r\n")) != std::string::npos) {
+                    std::string line = header_section.substr(0, pos);
+                    size_t colon_pos = line.find(':');
+                    if (colon_pos != std::string::npos) {
+                        std::string key = line.substr(0, colon_pos);
+                        std::string value = line.substr(colon_pos + 2); // Skip ": "
+                        headers[key] = value;
+                    }
+                    header_section.erase(0, pos + 2);
+                }
             }
         }
 
-        // Extract the User-Agent header
-        std::string user_agent;
-        size_t user_agent_start = request.find("User-Agent: ");
-        if (user_agent_start != std::string::npos) {
-            user_agent_start += 12; // Length of "User-Agent: "
-            size_t user_agent_end = request.find("\r\n", user_agent_start);
-            if (user_agent_end != std::string::npos) {
-                user_agent = request.substr(user_agent_start, user_agent_end - user_agent_start);
-            }
-        }
-
+        // Prepare response
         std::string response;
-        if (method == "GET" && path == "/user-agent") {
-            // Valid /user-agent path
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " 
-                        + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
+        if (method == "GET" && url.starts_with("/echo/")) {
+            response = httpResponse::_200();
+            const std::string& echo = url.substr(6);
+            response += "Content-Type: text/plain\r\n";
+            response += "Content-Length: " + std::to_string(echo.size()) + "\r\n\r\n";
+            response += echo;
+        } else if (method == "GET" && url == "/user-agent" && headers.count("User-Agent")) {
+            response = httpResponse::_200();
+            const std::string& user_agent = headers.at("User-Agent");
+            response += "Content-Type: text/plain\r\n";
+            response += "Content-Length: " + std::to_string(user_agent.size()) + "\r\n\r\n";
+            response += user_agent;
         } else {
             // Invalid path or method
             response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\n404 Not Found";
         }
 
-        send(client, response.c_str(), response.size(), 0);
-        close(client);
+        std::cout << "Response: " << response << std::endl;
+
+        sendToClient(client_fd, response.c_str(), response.size());
+        close(client_fd);
     }
 
     close(server_fd);
