@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
 
         std::string response;
         std::string body;
-        if (method == "GET" && path.find("/user-agent")) {
+        if (method == "GET" && path=="/user-agent") {
             // Extract the string after /echo/
             // 6 is the length of "/echo/"
             body =user-agent;
