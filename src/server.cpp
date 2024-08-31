@@ -1,116 +1,181 @@
-#include <iostream>
-#include <string>
-#include <cstring>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-
-int main(int argc, char **argv) {
-    std::cout << std::unitbuf; // Flush after every std::cout / std::cerr
-    std::cerr << std::unitbuf;
-
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        std::cerr << "Failed to create server socket\n";
-        return 1;
+#include "httpServer.h"
+void httpServer::sendToClient(int client_fd, const char *msg, int msg_size)
+{
+  send(client_fd, msg, msg_size, 0);
+}
+void httpServer::onAccept()
+{
+  struct sockaddr_in client_addr;
+  int client_addr_len = sizeof(client_addr);  
+  int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
+  if (client_fd < 0)
+  {
+    std::cerr << "Failed to accept connection\n";
+    return;
+  }
+  epoll_event event_cfg {};
+  event_cfg.data.fd = client_fd;
+  event_cfg.events = EPOLLIN;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_fd, &event_cfg) < 0)
+  {
+    std::cerr << "Failed to add client socket to epoll\n";
+    close(client_fd);
+    return;
+  }    
+}
+void httpServer::removeConnection(int client_fd)
+{
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_DEL, client_fd, NULL) < 0)
+  {
+    std::cerr << "Failed to remove client socket from epoll\n";
+  }
+  close(client_fd);
+}
+void httpServer::onClientConnect(int client_fd)
+{
+  const int MAX_BUFFER_SIZE = 1024;
+  char buffer[MAX_BUFFER_SIZE];
+  int msg_size = recv(client_fd, buffer, MAX_BUFFER_SIZE, 0);
+  if (msg_size < 0)
+  {
+    std::cerr << "Failed to read msg from connection.\n";
+    removeConnection(client_fd);
+  }
+  else if (msg_size == 0)
+  {
+    std::cout << "Removing connection\n";
+    removeConnection(client_fd);
+  }
+  else
+  {
+    onMessageRecieved(client_fd, buffer, msg_size);
+  }
+}
+void httpServer::onClientDisconnect(int client_fd)
+{
+}
+void httpServer::onMessageRecieved(int client_fd, const char *msg, int msg_size)
+{
+  httpRequest request(msg, msg_size);
+  // TODO improve later
+  if (request.method == httpMethod::GET)
+  {
+    onGet(client_fd, request);
+  }
+}
+void httpServer::onGet(int client_fd, httpRequest &request)
+{
+  httpResponse response;
+  if (request.url.starts_with("/echo/"))
+  {
+    response = httpResponse::_200();
+    const std::string& echo = response.body = request.url.substr(6);
+    response.headers["Content-Type"] = "text/plain";
+    response.headers["Content-Length"] = std::to_string(echo.size());
+  }
+  else if (request.url == "/user-agent" and request.headers.count("User-Agent"))
+  else if (request.url == "/user-agent" and request.headers.count("User-Agent") == 1)
+  {
+    response = httpResponse::_200();
+    const std::string& user_agent = response.body = response.headers["User-Agent"];
+    const std::string& user_agent = response.body = request.headers["User-Agent"];
+    response.headers["Content-Type"] = "text/plain";
+    response.headers["Content-Length"] = std::to_string(user_agent.size());
+  }
+  else if (request.url == "/")
+  {
+    response = httpResponse::_200();
+  }
+  else
+  {
+    response = httpResponse::_404();
+  }
+  std::string response_str = httpResponse::to_string(response);
+  sendToClient(client_fd, response_str.c_str(), response_str.size());
+}
+httpServer::httpServer(const char *address, int port, int backlog) : server_fd{-1},
+  epoll_fd{-1}, address{INADDR_ANY/*address == "" ? INADDR_ANY : inet_addr(address)*/}, port{port}, backlog{backlog}
+{
+}
+httpServer::~httpServer()
+{
+  close(server_fd);
+  close(epoll_fd);
+}
+// Returns 0 if no errors occurred, -1 if an error occurred
+int httpServer::init()
+{
+  server_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_fd < 0)
+  {
+    std::cerr << "Failed to create server socket\n";
+    return -1;
+  }
+  int reuse = 1;
+  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) 
+  {
+    std::cerr << "setsockopt failed\n";
+    return -1;
+  }  
+  struct sockaddr_in server_addr;
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = (in_addr_t)address;
+  server_addr.sin_port = htons(port);
+  
+  if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) 
+  {
+    std::cout << address << '\n';
+    std::cerr << "Failed to bind to port " << port << '\n';
+    return -1;
+  }
+  if (listen(server_fd, backlog) != 0) 
+  {
+    std::cerr << "listen failed\n";
+    return -1;
+  }
+  epoll_fd = epoll_create1(0);
+  if (epoll_fd < 0)
+  {
+    std::cerr << "epoll_create1 failed\n";
+    return -1;
+  }
+  epoll_event event_cfg;
+  event_cfg.data.fd = server_fd;
+  event_cfg.events = EPOLLIN;
+  if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_fd, &event_cfg) < 0)
+  {
+    std::cerr << "Failed to add server_fd to epoll\n";
+    return -1;
+  }
+  std::cout << "Server is now online\n";
+  return 0;
+}
+void httpServer::run()
+{
+  std::cout << "Server is now running\n";
+  const int MAX_EVENTS = 100;
+  epoll_event events[MAX_EVENTS];
+  while (true)
+  {
+    int events_size = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+    if (events_size < 0)
+    {
+      std::cerr << "epoll_wait failed\n";
+      continue;
     }
-
-    int reuse = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        std::cerr << "setsockopt failed\n";
-        return 1;
+    for (int i = 0; i < events_size; ++i)
+    {
+      int event_fd = events[i].data.fd;
+      if (event_fd == server_fd)
+      {
+        std::cout << "New connection coming in.\n";
+        onAccept();
+      }
+      else
+      {
+        std::cout << "Request coming in.\n";
+        onClientConnect(event_fd);
+      }
     }
-
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(4221);
-    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) != 0) {
-        std::cerr << "Failed to bind to port 4221\n";
-        return 1;
-    }
-
-    int connection_backlog = 5;
-    if (listen(server_fd, connection_backlog) != 0) {
-        std::cerr << "listen failed\n";
-        return 1;
-    }
-
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-    std::cout << "Waiting for a client to connect...\n";
-
-    while (true) {
-        int client = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-        if (client < 0) {
-            std::cerr << "accept failed\n";
-            return 1;
-        }
-
-        char buffer[1024] = {0};
-        ssize_t bytes_read = read(client, buffer, sizeof(buffer) - 1);
-        if (bytes_read < 0) {
-            std::cerr << "read failed\n";
-            close(client);
-            continue;
-        }
-        std::string request(buffer, bytes_read);
-        std::cout << "Received request:\n" << request << std::endl;
-
-        std::string method, path;
-        size_t method_end = request.find(' ');
-        if (method_end != std::string::npos) {
-            method = request.substr(0, method_end);
-            size_t path_start = method_end + 1;
-            size_t path_end = request.find(' ', path_start);
-            if (path_end != std::string::npos) {
-                path = request.substr(path_start, path_end - path_start);
-            }
-        }
-
-        std::string user_agent;
-        std::string header_name;
-        std::string header_value;
-        size_t header_start = request.find("\r\n") + 2;
-        while (header_start != std::string::npos) {
-            size_t header_end = request.find("\r\n", header_start);
-            if (header_end == std::string::npos) break;
-            std::string header_line = request.substr(header_start, header_end - header_start);
-            size_t colon_pos = header_line.find(':');
-            if (colon_pos != std::string::npos) {
-                header_name = header_line.substr(0, colon_pos);
-                header_value = header_line.substr(colon_pos + 1);
-                if (header_name == "User-Agent") {
-                    user_agent = header_value;
-                    // Trim leading and trailing whitespace
-                    user_agent.erase(0, user_agent.find_first_not_of(" \t"));
-                    user_agent.erase(user_agent.find_last_not_of(" \t") + 1);
-                }
-            }
-            header_start = header_end + 2;
-        }
-
-        std::string response;
-        if (method == "GET" && path == "/user-agent") {
-            // Create the response based on the User-Agent header
-            std::string body = user_agent;
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        } else if (method == "GET" && path == "/") {
-            // Root path
-            std::string body = "Hello, World!";
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        } else {
-            // Invalid path
-            std::string body = "404 Not Found";
-            response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
-        }
-
-        send(client, response.c_str(), response.length(), 0);
-        close(client);
-    }
-
-    close(server_fd);
-    return 0;
+  }
 }
