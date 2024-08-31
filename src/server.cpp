@@ -70,8 +70,12 @@ int main(int argc, char **argv) {
         }
 
         std::string response;
-        if (method == "GET" && path == "/") {
-            // Valid path
+        if (method == "GET" && path.find("/echo/") == 0) {
+            // Extract the string after /echo/
+            std::string echo_str = path.substr(6); // 6 is the length of "/echo/"
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n" + echo_str;
+        } else if (method == "GET" && path == "/") {
+            // Root path
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!";
         } else {
             // Invalid path
@@ -85,4 +89,3 @@ int main(int argc, char **argv) {
     close(server_fd);
     return 0;
 }
-
