@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <vector>
 #include <sstream>
+#include <thread> // Include thread library
 #include <algorithm> // For std::remove_if
 
 // Function to split a message based on a delimiter
@@ -48,6 +49,41 @@ std::string get_user_agent(const std::string &request) {
     return ""; // Return empty if User-Agent is not found
 }
 
+// Function to handle client requests
+void handle_client(int client_fd) {
+    char buffer[1024] = {0};
+    int ret = read(client_fd, buffer, sizeof(buffer));
+    if (ret < 0) {
+        std::cerr << "Error in reading from client socket" << std::endl;
+    } else if (ret == 0) {
+        std::cout << "No bytes read" << std::endl;
+    } else {
+        std::string request(buffer);
+        std::cout << "Request: " << request << std::endl;
+
+        std::string path = get_path(request);
+        std::string user_agent = get_user_agent(request);
+        std::vector<std::string> split_paths = split_message(path, "/");
+        
+        std::string response;
+        if (path == "/") {
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
+        } else if (path == "/user-agent") {
+            // Respond with the User-Agent
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
+        } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+        } else {
+            response = "HTTP/1.1 404 Not Found\r\n\r\n";
+        }
+
+        std::cout << "Response: " << response << std::endl;
+        write(client_fd, response.c_str(), response.length());
+    }
+
+    close(client_fd); // Close the client socket
+}
+
 int main(int argc, char **argv) {
     std::cout << "Logs from your program will appear here!\n";
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -80,48 +116,23 @@ int main(int argc, char **argv) {
     }
 
     struct sockaddr_in client_addr;
-    int client_addr_len = sizeof(client_addr);
+    socklen_t client_addr_len = sizeof(client_addr);
 
     std::cout << "Waiting for a client to connect...\n";
 
-    int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-    if (client_fd < 0) {
-        std::cerr << "Error in accepting client" << std::endl;
-    } else {
-        std::cout << "Client connected\n";
-    }
-
-    char buffer[1024];
-    int ret = read(client_fd, buffer, sizeof(buffer));
-    if (ret < 0) {
-        std::cerr << "Error in reading from client socket" << std::endl;
-    } else if (ret == 0) {
-        std::cout << "No bytes read" << std::endl;
-    } else {
-        std::string request(buffer);
-        std::cout << "Request: " << request << std::endl;
-
-        std::string path = get_path(request);
-        std::string user_agent = get_user_agent(request);
-        std::vector<std::string> split_paths = split_message(path, "/");
-        
-        std::string response;
-        if (path == "/") {
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
-        } else if (path == "/user-agent") {
-            // Respond with the User-Agent
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
-        } else if (split_paths[1] == "echo") {
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-        } else {
-            response = "HTTP/1.1 404 Not Found\r\n\r\n";
+    while (true) {
+        int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+        if (client_fd < 0) {
+            std::cerr << "Error in accepting client" << std::endl;
+            continue; // Continue to accept other connections
         }
 
-        std::cout << "Response: " << response << std::endl;
-        write(client_fd, response.c_str(), response.length());
+        std::cout << "Client connected\n";
+
+        // Create a new thread to handle the client request
+        std::thread(handle_client, client_fd).detach(); // Detach the thread to allow concurrent handling
     }
 
-    close(client_fd);
     close(server_fd);
     return 0;
 }
