@@ -70,16 +70,20 @@ int main(int argc, char **argv) {
         }
 
         std::string response;
+        std::string body;
         if (method == "GET" && path.find("/echo/") == 0) {
             // Extract the string after /echo/
             std::string echo_str = path.substr(6); // 6 is the length of "/echo/"
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n" + echo_str;
+            body = echo_str;
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         } else if (method == "GET" && path == "/") {
             // Root path
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nHello, World!";
+            body = "Hello, World!";
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         } else {
             // Invalid path
-            response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n404 Not Found";
+            body = "404 Not Found";
+            response = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         }
 
         send(client, response.c_str(), response.length(), 0);
