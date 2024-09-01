@@ -27,6 +27,11 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
+std::string get_method(const std::string &request) {
+    std::vector<std::string> toks = split_message(request, "\r\n");
+    std::vector<std::string> path_toks = split_message(toks[0], " ");
+    return path_toks[0];
+}
 
 // Function to get the request path from the HTTP request
 std::string get_path(const std::string &request) {
@@ -41,7 +46,29 @@ std::string trim(const std::string &str) {
     size_t last = str.find_last_not_of(" \t");
     return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
 }
-
+size_t get_content_length(const std::string &request) {
+    std::vector<std::string> lines = split_message(request, "\r\n");
+    for (const auto &line : lines) {
+        if (line.find("Content-Length:") == 0) {
+            return std::stoull(trim(line.substr(strlen("Content-Length:"))));
+        }
+    }
+    return 0;
+}
+std::string get_request_body(const std::string &request) {
+    std::vector<std::string> lines = split_message(request, "\r\n");
+    int body_start = -1;
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (lines[i].empty()) {
+            body_start = i + 1;
+            break;
+        }
+    }
+    if (body_start != -1) {
+        return request.substr(request.find("\r\n\r\n") + 4);
+    }
+    return "";
+}
 // Function to extract the User-Agent header from the request
 std::string get_user_agent(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
