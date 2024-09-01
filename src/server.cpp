@@ -12,8 +12,9 @@
 #include <thread>
 #include <fstream>
 #include <sys/stat.h>
-#include <filesystem> // C++17 for filesystem support
-#include <algorithm>  // For std::find
+#include <filesystem>
+#include <algorithm>
+#include <zlib.h> // Include zlib for gzip compression
 namespace fs = std::filesystem;
 
 // Function to split a message based on a delimiter
@@ -27,12 +28,7 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
-std::string trim(const std::string &str) {
-    const auto first = str.find_first_not_of(" \t");
-    if (first == std::string::npos) return "";
-    const auto last = str.find_last_not_of(" \t");
-    return str.substr(first, (last - first + 1));
-}
+
 // Function to get the value of a header from the request
 std::string get_header_value(const std::string &request, const std::string &header_name) {
     std::vector<std::string> lines = split_message(request, "\r\n");
@@ -45,7 +41,12 @@ std::string get_header_value(const std::string &request, const std::string &head
 }
 
 // Function to trim whitespace from both ends of a string
-
+std::string trim(const std::string &str) {
+    const auto first = str.find_first_not_of(" \t");
+    if (first == std::string::npos) return "";
+    const auto last = str.find_last_not_of(" \t");
+    return str.substr(first, (last - first + 1));
+}
 
 // Function to get the request path from the HTTP request
 std::string get_path(const std::string &request) {
@@ -74,6 +75,18 @@ std::string get_request_body(const std::string &request) {
     return (pos == std::string::npos) ? "" : request.substr(pos + delimiter.length());
 }
 
+// Function to compress data using gzip
+std::string gzip_compress(const std::string &data) {
+    uLongf compressed_size = compressBound(data.size());
+    std::string compressed_data(compressed_size, '\0');
+    if (compress(reinterpret_cast<Bytef*>(&compressed_data[0]), &compressed_size,
+                 reinterpret_cast<const Bytef*>(data.data()), data.size()) != Z_OK) {
+        return ""; // Compression failed
+    }
+    compressed_data.resize(compressed_size);
+    return compressed_data;
+}
+
 // Function to handle client requests
 void handle_client(int client_fd, const std::string &directory) {
     char buffer[1024] = {0};
@@ -94,6 +107,7 @@ void handle_client(int client_fd, const std::string &directory) {
         // Determine response headers
         std::string response;
         std::string content_encoding;
+        std::string response_body;
 
         // Check if the client accepts gzip compression
         if (accept_encoding.find("gzip") != std::string::npos) {
@@ -102,12 +116,20 @@ void handle_client(int client_fd, const std::string &directory) {
 
         if (method == "GET") {
             if (path == "/") {
-                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n" + content_encoding + "\r\nHello, World!";
+                response_body = "Hello, World!";
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (path == "/user-agent") {
-                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n" + content_encoding + "\r\n" + user_agent;
+                response_body = user_agent;
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (path.find("/echo/") == 0) {
                 std::string echo_str = path.substr(6);
-                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(echo_str.length()) + "\r\n" + content_encoding + "\r\n" + echo_str;
+                if (!content_encoding.empty()) {
+                    response_body = gzip_compress(echo_str);
+                    response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n";
+                } else {
+                    response_body = echo_str;
+                    response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
+                }
             } else if (path.find("/files/") == 0) {
                 std::string filename = path.substr(7); // Get the filename
                 fs::path file_path = fs::path(directory) / filename; // Construct the full path
@@ -121,7 +143,13 @@ void handle_client(int client_fd, const std::string &directory) {
                         // Read the file content
                         std::string file_content(size, '\0');
                         if (file.read(&file_content[0], size)) {
-                            response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n" + content_encoding + "\r\n" + file_content;
+                            if (!content_encoding.empty()) {
+                                file_content = gzip_compress(file_content);
+                                response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n" + content_encoding + "Content-Length: " + std::to_string(file_content.length()) + "\r\n\r\n";
+                            } else {
+                                response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n";
+                            }
+                            response += file_content;
                         }
                     }
                 } else {
@@ -157,48 +185,4 @@ void handle_client(int client_fd, const std::string &directory) {
 }
 
 int main(int argc, char **argv) {
-    std::string directory = "."; // Default directory
-    if (argc > 2 && std::string(argv[1]) == "--directory") {
-        directory = argv[2]; // Get the directory from command line
-    }
-    std::cout << "Logs from your program will appear here!\n";
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        std::cerr << "Failed to create server socket\n";
-        return 1;
-    }
-    // Set socket options to avoid 'Address already in use' errors
-    int reuse = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
-        std::cerr << "setsockopt failed\n";
-        return 1;
-    }
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(4221);
-    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-        std::cerr << "Failed to bind to port 4221\n";
-        return 1;
-    }
-    int connection_backlog = 5;
-    if (listen(server_fd, connection_backlog) != 0) {
-        std::cerr << "listen failed\n";
-        return 1;
-    }
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-    std::cout << "Waiting for a client to connect...\n";
-    while (true) {
-        int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-        if (client_fd < 0) {
-            std::cerr << "Error in accepting client" << std::endl;
-            continue; // Continue to accept other connections
-        }
-        std::cout << "Client connected\n";
-        // Create a new thread to handle the client request
-        std::thread(handle_client, client_fd, directory).detach(); // Detach the thread to allow concurrent handling
-    }
-    close(server_fd);
-    return 0;
-}
+    std::string directory = "."
