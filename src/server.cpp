@@ -109,6 +109,7 @@ void handle_client(int client_fd, const std::string &directory) {
         std::string response;
         if (method == "GET") {
             if (path == "/") {
+              
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
                 if (accept_encoding.find("gzip") != std::string::npos) {
                     response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
@@ -117,6 +118,7 @@ void handle_client(int client_fd, const std::string &directory) {
                 response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (path == "/user-agent") {
                 // Respond with the User-Agent
+                 std::string response_body = split_paths[2]; // Get the string to echo
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
                 if (accept_encoding.find("gzip") != std::string::npos) {
                     response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
@@ -124,6 +126,7 @@ void handle_client(int client_fd, const std::string &directory) {
 
                 response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+               std::string response_body = split_paths[2]; // Get the string to echo
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
                 if (accept_encoding.find("gzip") != std::string::npos) {
                     response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
@@ -131,6 +134,7 @@ void handle_client(int client_fd, const std::string &directory) {
 
                 response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "files") {
+               std::string response_body = split_paths[2]; // Get the string to echo
                 // Handle GET requests for files
                 std::string filename = split_paths[2]; // Get the filename
                 fs::path file_path = fs::path(directory) / filename; // Construct the full path
@@ -165,6 +169,7 @@ void handle_client(int client_fd, const std::string &directory) {
         } else if (method == "POST") {
             if (split_paths.size() > 1 && split_paths[1] == "files") {
                 // Handle POST requests for files
+                
                 std::string filename = split_paths[2]; // Get the filename
                 fs::path file_path = fs::path(directory) / filename; // Construct the full path
 
