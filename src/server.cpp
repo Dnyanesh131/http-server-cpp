@@ -12,7 +12,7 @@
 #include <thread>
 #include <fstream>
 #include <sys/stat.h>
-#include <filesystem>
+#include <filesystem> // C++17 for filesystem support
 
 namespace fs = std::filesystem;
 
@@ -35,29 +35,6 @@ std::string get_path(const std::string &request) {
     return path_toks[1];
 }
 
-// Function to get the request method from the HTTP request
-std::string get_method(const std::string &request) {
-    std::vector<std::string> toks = split_message(request, "\r\n");
-    std::vector<std::string> path_toks = split_message(toks[0], " ");
-    return path_toks[0];
-}
-
-// Function to extract the request body from the HTTP request
-std::string get_request_body(const std::string &request) {
-    std::vector<std::string> lines = split_message(request, "\r\n");
-    int body_start = -1;
-    for (size_t i = 0; i < lines.size(); i++) {
-        if (lines[i].empty()) {
-            body_start = i + 1;
-            break;
-        }
-    }
-    if (body_start != -1) {
-        return request.substr(request.find("\r\n\r\n") + 4);
-    }
-    return "";
-}
-
 // Function to trim whitespace from both ends of a string
 std::string trim(const std::string &str) {
     size_t first = str.find_first_not_of(" \t");
@@ -65,15 +42,15 @@ std::string trim(const std::string &str) {
     return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
 }
 
-// Function to extract the Content-Length header from the HTTP request
-size_t get_content_length(const std::string &request) {
+// Function to extract the User-Agent header from the request
+std::string get_user_agent(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
-        if (line.find("Content-Length:") == 0) {
-            return std::stoull(trim(line.substr(strlen("Content-Length:"))));
+        if (line.find("User-Agent:") == 0) {
+            return trim(line.substr(strlen("User-Agent:"))); // Trim whitespace
         }
     }
-    return 0;
+    return ""; // Return empty if User-Agent is not found
 }
 
 // Function to handle client requests
@@ -90,7 +67,7 @@ void handle_client(int client_fd, const std::string &directory) {
 
         std::string path = get_path(request);
         std::string method = get_method(request);
-        
+        std::string user_agent = get_user_agent(request); // Declare and initialize user_agent
         std::vector<std::string> split_paths = split_message(path, "/");
         
         std::string response;
