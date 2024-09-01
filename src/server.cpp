@@ -28,7 +28,12 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
-
+std::string trim(const std::string &str) {
+    const auto first = str.find_first_not_of(" \t");
+    if (first == std::string::npos) return "";
+    const auto last = str.find_last_not_of(" \t");
+    return str.substr(first, (last - first + 1));
+}
 // Function to get the value of a header from the request
 std::string get_header_value(const std::string &request, const std::string &header_name) {
     std::vector<std::string> lines = split_message(request, "\r\n");
@@ -41,7 +46,7 @@ std::string get_header_value(const std::string &request, const std::string &head
 }
 
 // Function to trim whitespace from both ends of a string
-std::string trim(const std::string &str) {
+
     const auto first = str.find_first_not_of(" \t");
     if (first == std::string::npos) return "";
     const auto last = str.find_last_not_of(" \t");
