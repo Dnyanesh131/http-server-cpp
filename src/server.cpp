@@ -15,12 +15,13 @@
 #include <filesystem>
 #include <algorithm>
 #include <zlib.h> // Include zlib for gzip compression
+
 namespace fs = std::filesystem;
 
 // Function to split a message based on a delimiter
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
     std::vector<std::string> toks;
-    std::stringstream ss = std::stringstream{message};
+    std::stringstream ss(message);
     std::string line;
     while (getline(ss, line, *delim.begin())) {
         toks.push_back(line);
@@ -28,12 +29,14 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
+// Function to trim whitespace from both ends of a string
 std::string trim(const std::string &str) {
     const auto first = str.find_first_not_of(" \t");
     if (first == std::string::npos) return "";
     const auto last = str.find_last_not_of(" \t");
     return str.substr(first, (last - first + 1));
 }
+
 // Function to get the value of a header from the request
 std::string get_header_value(const std::string &request, const std::string &header_name) {
     std::vector<std::string> lines = split_message(request, "\r\n");
@@ -45,9 +48,7 @@ std::string get_header_value(const std::string &request, const std::string &head
     return "";
 }
 
-// Function to trim whitespace from both ends of a string
 
-    
 
 // Function to get the request path from the HTTP request
 std::string get_path(const std::string &request) {
@@ -186,4 +187,48 @@ void handle_client(int client_fd, const std::string &directory) {
 }
 
 int main(int argc, char **argv) {
-    std::string directory = "."
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " <directory>" << std::endl;
+        return EXIT_FAILURE;
+    }
+    
+    std::string directory = argv[1];
+    
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        std::cerr << "Error creating socket" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    sockaddr_in server_addr = {};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(4221);
+
+    if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        std::cerr << "Bind failed" << std::endl;
+        close(server_fd);
+        return EXIT_FAILURE;
+    }
+
+    if (listen(server_fd, 10) < 0) {
+        std::cerr << "Listen failed" << std::endl;
+        close(server_fd);
+        return EXIT_FAILURE;
+    }
+
+    std::cout << "Server listening on port 4221..." << std::endl;
+
+    while (true) {
+        int client_fd = accept(server_fd, nullptr, nullptr);
+        if (client_fd < 0) {
+            std::cerr << "Accept failed" << std::endl;
+            continue;
+        }
+
+        std::thread(handle_client, client_fd, directory).detach();
+    }
+
+    close(server_fd);
+    return EXIT_SUCCESS;
+}
