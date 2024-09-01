@@ -13,13 +13,12 @@
 #include <fstream>
 #include <sys/stat.h>
 #include <filesystem> // C++17 for filesystem support
-
 namespace fs = std::filesystem;
 
 // Function to split a message based on a delimiter
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
     std::vector<std::string> toks;
-    std::stringstream ss = std::stringstream{message};
+    std::stringstream ss(message);
     std::string line;
     while (getline(ss, line, *delim.begin())) {
         toks.push_back(line);
@@ -27,6 +26,14 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
+
+std::string trim(const std::string &str) {
+    size_t first = str.find_first_not_of(" \t");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t");
+    return str.substr(first, (last - first + 1));
+}
+
 std::string get_method(const std::string &request) {
     std::vector<std::string> toks = split_message(request, "\r\n");
     std::vector<std::string> path_toks = split_message(toks[0], " ");
@@ -40,12 +47,6 @@ std::string get_path(const std::string &request) {
     return path_toks[1];
 }
 
-// Function to trim whitespace from both ends of a string
-std::string trim(const std::string &str) {
-    size_t first = str.find_first_not_of(" \t");
-    size_t last = str.find_last_not_of(" \t");
-    return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
-}
 size_t get_content_length(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
@@ -55,6 +56,7 @@ size_t get_content_length(const std::string &request) {
     }
     return 0;
 }
+
 std::string get_request_body(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     int body_start = -1;
@@ -69,21 +71,24 @@ std::string get_request_body(const std::string &request) {
     }
     return "";
 }
+
 // Function to extract the User-Agent header from the request
 std::string get_user_agent(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
         if (line.find("User-Agent:") == 0) {
-            return trim(line.substr(strlen("User-Agent:"))); // Trim whitespace
+            return trim(line.substr(strlen("User-Agent:")));
         }
     }
     return ""; // Return empty if User-Agent is not found
 }
+
+// Function to extract the Accept-Encoding header from the request
 std::string get_accept_encoding(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
         if (line.find("Accept-Encoding:") == 0) {
-            return trim(line.substr(strlen("Accept-Encoding:"))); // Trim whitespace
+            return trim(line.substr(strlen("Accept-Encoding:")));
         }
     }
     return ""; // Return empty if Accept-Encoding is not found
@@ -102,82 +107,54 @@ void handle_client(int client_fd, const std::string &directory) {
         std::cout << "Request: " << request << std::endl;
 
         std::string path = get_path(request);
+        std::string user_agent = get_user_agent(request);
+        std::string accept_encoding = get_accept_encoding(request);
         std::string method = get_method(request);
-        std::string user_agent = get_user_agent(request); // Declare and initialize user_agent
+
         std::vector<std::string> split_paths = split_message(path, "/");
-          std::string accept_encoding = get_accept_encoding(request);
         std::string response;
+
+        bool gzip_supported = accept_encoding.find("gzip") != std::string::npos;
+
         if (method == "GET") {
             if (path == "/") {
-              
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
-                if (accept_encoding.find("gzip") != std::string::npos) {
-                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
-                }
-
-                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (path == "/user-agent") {
-                // Respond with the User-Agent
-                 std::string response_body = split_paths[2]; // Get the string to echo
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
-                if (accept_encoding.find("gzip") != std::string::npos) {
-                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
-                }
-
-                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
-               std::string response_body = split_paths[2]; // Get the string to echo
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-                if (accept_encoding.find("gzip") != std::string::npos) {
-                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
-                }
-
-                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "files") {
-               std::string response_body = split_paths[2]; // Get the string to echo
-                // Handle GET requests for files
-                std::string filename = split_paths[2]; // Get the filename
-                fs::path file_path = fs::path(directory) / filename; // Construct the full path
-
-                // Check if the file exists
+                std::string filename = split_paths[2];
+                fs::path file_path = fs::path(directory) / filename;
                 if (fs::exists(file_path) && fs::is_regular_file(file_path)) {
                     std::ifstream file(file_path, std::ios::binary);
                     if (file) {
-                        // Get the file size
                         file.seekg(0, std::ios::end);
                         std::streamsize size = file.tellg();
                         file.seekg(0, std::ios::beg);
-
-                        // Read the file content
                         std::string file_content(size, '\0');
                         if (file.read(&file_content[0], size)) {
                             response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n" + file_content;
-                            if (accept_encoding.find("gzip") != std::string::npos) {
-                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
-                }
-
-                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
                         }
                     }
                 } else {
-                    // File not found
                     response = "HTTP/1.1 404 Not Found\r\n\r\n";
                 }
             } else {
                 response = "HTTP/1.1 404 Not Found\r\n\r\n";
             }
+
+            if (gzip_supported) {
+                // Add Content-Encoding header if gzip is supported
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n" + response.substr(response.find("\r\n\r\n"));
+            }
+
         } else if (method == "POST") {
             if (split_paths.size() > 1 && split_paths[1] == "files") {
-                // Handle POST requests for files
-                
-                std::string filename = split_paths[2]; // Get the filename
-                fs::path file_path = fs::path(directory) / filename; // Construct the full path
-
-                // Get the request body
+                std::string filename = split_paths[2];
+                fs::path file_path = fs::path(directory) / filename;
                 std::string request_body = get_request_body(request);
                 size_t content_length = get_content_length(request);
-
-                // Write the request body to the file
                 std::ofstream file(file_path, std::ios::binary);
                 if (file) {
                     file.write(request_body.c_str(), content_length);
@@ -195,14 +172,13 @@ void handle_client(int client_fd, const std::string &directory) {
         std::cout << "Response: " << response << std::endl;
         write(client_fd, response.c_str(), response.length());
     }
-
-    close(client_fd); // Close the client socket
+    close(client_fd);
 }
 
 int main(int argc, char **argv) {
     std::string directory = "."; // Default directory
     if (argc > 2 && std::string(argv[1]) == "--directory") {
-        directory = argv[2]; // Get the directory from command line
+        directory = argv[2];
     }
 
     std::cout << "Logs from your program will appear here!\n";
@@ -212,7 +188,6 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    // Set socket options to avoid 'Address already in use' errors
     int reuse = 1;
     if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
         std::cerr << "setsockopt failed\n";
@@ -223,36 +198,4 @@ int main(int argc, char **argv) {
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(4221);
-
-    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-        std::cerr << "Failed to bind to port 4221\n";
-        return 1;
-    }
-
-    int connection_backlog = 5;
-    if (listen(server_fd, connection_backlog) != 0) {
-        std::cerr << "listen failed\n";
-        return 1;
-    }
-
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-
-    std::cout << "Waiting for a client to connect...\n";
-
-    while (true) {
-        int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
-        if (client_fd < 0) {
-            std::cerr << "Error in accepting client" << std::endl;
-            continue; // Continue to accept other connections
-        }
-
-        std::cout << "Client connected\n";
-
-        // Create a new thread to handle the client request
-        std::thread(handle_client, client_fd, directory).detach(); // Detach the thread to allow concurrent handling
-    }
-
-    close(server_fd);
-    return 0;
-}
+    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr))
