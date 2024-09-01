@@ -196,23 +196,27 @@ int main(int argc, char **argv) {
     
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == -1) {
-        std::cerr << "Error creating socket" << std::endl;
+        std::cerr << "Error creating socket: " << strerror(errno) << std::endl;
         return EXIT_FAILURE;
     }
+    
+    std::cout << "Socket created successfully" << std::endl;
 
     sockaddr_in server_addr = {};
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(4221);
 
+    std::cout << "Binding to port 4221..." << std::endl;
     if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        std::cerr << "Bind failed" << std::endl;
+        std::cerr << "Bind failed: " << strerror(errno) << std::endl;
         close(server_fd);
         return EXIT_FAILURE;
     }
-
+    
+    std::cout << "Listening on port 4221..." << std::endl;
     if (listen(server_fd, 10) < 0) {
-        std::cerr << "Listen failed" << std::endl;
+        std::cerr << "Listen failed: " << strerror(errno) << std::endl;
         close(server_fd);
         return EXIT_FAILURE;
     }
@@ -222,7 +226,7 @@ int main(int argc, char **argv) {
     while (true) {
         int client_fd = accept(server_fd, nullptr, nullptr);
         if (client_fd < 0) {
-            std::cerr << "Accept failed" << std::endl;
+            std::cerr << "Accept failed: " << strerror(errno) << std::endl;
             continue;
         }
 
