@@ -12,7 +12,7 @@
 #include <thread>
 #include <fstream>
 #include <sys/stat.h>
-#include <filesystem> // C++17 for filesystem support
+#include <filesystem>
 
 namespace fs = std::filesystem;
 
@@ -35,6 +35,29 @@ std::string get_path(const std::string &request) {
     return path_toks[1];
 }
 
+// Function to get the request method from the HTTP request
+std::string get_method(const std::string &request) {
+    std::vector<std::string> toks = split_message(request, "\r\n");
+    std::vector<std::string> path_toks = split_message(toks[0], " ");
+    return path_toks[0];
+}
+
+// Function to extract the request body from the HTTP request
+std::string get_request_body(const std::string &request) {
+    std::vector<std::string> lines = split_message(request, "\r\n");
+    int body_start = -1;
+    for (size_t i = 0; i < lines.size(); i++) {
+        if (lines[i].empty()) {
+            body_start = i + 1;
+            break;
+        }
+    }
+    if (body_start != -1) {
+        return request.substr(request.find("\r\n\r\n") + 4);
+    }
+    return "";
+}
+
 // Function to trim whitespace from both ends of a string
 std::string trim(const std::string &str) {
     size_t first = str.find_first_not_of(" \t");
@@ -42,15 +65,15 @@ std::string trim(const std::string &str) {
     return (first == std::string::npos) ? "" : str.substr(first, (last - first + 1));
 }
 
-// Function to extract the User-Agent header from the request
-std::string get_user_agent(const std::string &request) {
+// Function to extract the Content-Length header from the HTTP request
+size_t get_content_length(const std::string &request) {
     std::vector<std::string> lines = split_message(request, "\r\n");
     for (const auto &line : lines) {
-        if (line.find("User-Agent:") == 0) {
-            return trim(line.substr(strlen("User-Agent:"))); // Trim whitespace
+        if (line.find("Content-Length:") == 0) {
+            return std::stoull(trim(line.substr(strlen("Content-Length:"))));
         }
     }
-    return ""; // Return empty if User-Agent is not found
+    return 0;
 }
 
 // Function to handle client requests
@@ -66,39 +89,65 @@ void handle_client(int client_fd, const std::string &directory) {
         std::cout << "Request: " << request << std::endl;
 
         std::string path = get_path(request);
+        std::string method = get_method(request);
         std::string user_agent = get_user_agent(request);
         std::vector<std::string> split_paths = split_message(path, "/");
         
         std::string response;
-        if (path == "/") {
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
-        } else if (path == "/user-agent") {
-            // Respond with the User-Agent
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
-        } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
-        } else if (split_paths.size() > 1 && split_paths[1] == "files") {
-            // Handle file requests
-            std::string filename = split_paths[2]; // Get the filename
-            fs::path file_path = fs::path(directory) / filename; // Construct the full path
+        if (method == "GET") {
+            if (path == "/") {
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
+            } else if (path == "/user-agent") {
+                // Respond with the User-Agent
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
+            } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+            } else if (split_paths.size() > 1 && split_paths[1] == "files") {
+                // Handle GET requests for files
+                std::string filename = split_paths[2]; // Get the filename
+                fs::path file_path = fs::path(directory) / filename; // Construct the full path
 
-            // Check if the file exists
-            if (fs::exists(file_path) && fs::is_regular_file(file_path)) {
-                std::ifstream file(file_path, std::ios::binary);
-                if (file) {
-                    // Get the file size
-                    file.seekg(0, std::ios::end);
-                    std::streamsize size = file.tellg();
-                    file.seekg(0, std::ios::beg);
+                // Check if the file exists
+                if (fs::exists(file_path) && fs::is_regular_file(file_path)) {
+                    std::ifstream file(file_path, std::ios::binary);
+                    if (file) {
+                        // Get the file size
+                        file.seekg(0, std::ios::end);
+                        std::streamsize size = file.tellg();
+                        file.seekg(0, std::ios::beg);
 
-                    // Read the file content
-                    std::string file_content(size, '\0');
-                    if (file.read(&file_content[0], size)) {
-                        response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n" + file_content;
+                        // Read the file content
+                        std::string file_content(size, '\0');
+                        if (file.read(&file_content[0], size)) {
+                            response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n" + file_content;
+                        }
                     }
+                } else {
+                    // File not found
+                    response = "HTTP/1.1 404 Not Found\r\n\r\n";
                 }
             } else {
-                // File not found
+                response = "HTTP/1.1 404 Not Found\r\n\r\n";
+            }
+        } else if (method == "POST") {
+            if (split_paths.size() > 1 && split_paths[1] == "files") {
+                // Handle POST requests for files
+                std::string filename = split_paths[2]; // Get the filename
+                fs::path file_path = fs::path(directory) / filename; // Construct the full path
+
+                // Get the request body
+                std::string request_body = get_request_body(request);
+                size_t content_length = get_content_length(request);
+
+                // Write the request body to the file
+                std::ofstream file(file_path, std::ios::binary);
+                if (file) {
+                    file.write(request_body.c_str(), content_length);
+                    response = "HTTP/1.1 201 Created\r\n\r\n";
+                } else {
+                    response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+                }
+            } else {
                 response = "HTTP/1.1 404 Not Found\r\n\r\n";
             }
         } else {
