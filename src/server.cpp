@@ -76,23 +76,45 @@ std::string get_request_body(const std::string &request) {
     return (pos == std::string::npos) ? "" : request.substr(pos + delimiter.length());
 }
 std::string compress_gzip(const std::string &data) {
-    // Allocate enough memory for the compressed data
-    uLongf compressed_size = compressBound(data.size());
-    std::vector<Bytef> compressed_data(compressed_size);
+    // Initialize the z_stream
+    z_stream zs;
+    memset(&zs, 0, sizeof(zs));
 
-    // Perform compression using zlib
-    int res = compress(compressed_data.data(), &compressed_size, reinterpret_cast<const Bytef *>(data.c_str()), data.size());
-    
-    // Check if compression was successful
-    if (res != Z_OK) {
-        std::cerr << "Error during compression: " << res << std::endl;
+    // The windowBits parameter is set to 15 + 16 to produce a gzip header + trailer around the compressed data
+    if (deflateInit2(&zs, Z_BEST_COMPRESSION, Z_DEFLATED, 15 + 16, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+        std::cerr << "deflateInit2 failed" << std::endl;
         return "";
     }
 
-    // Convert to string and resize to actual compressed data size
-    std::string compressed(compressed_data.begin(), compressed_data.begin() + compressed_size);
-    return compressed;
+    zs.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(data.data()));
+    zs.avail_in = static_cast<uInt>(data.size());
+
+    int ret;
+    char outbuffer[32768];
+    std::string compressed_data;
+
+    // Compress the data in a loop
+    do {
+        zs.next_out = reinterpret_cast<Bytef *>(outbuffer);
+        zs.avail_out = sizeof(outbuffer);
+
+        ret = deflate(&zs, Z_FINISH);
+
+        if (compressed_data.size() < zs.total_out) {
+            compressed_data.append(outbuffer, zs.total_out - compressed_data.size());
+        }
+    } while (ret == Z_OK);
+
+    deflateEnd(&zs);
+
+    if (ret != Z_STREAM_END) {
+        std::cerr << "Compression failed: " << ret << std::endl;
+        return "";
+    }
+
+    return compressed_data;
 }
+
 
 // Function to handle client requests
 void handle_client(int client_fd, const std::string &directory) {
