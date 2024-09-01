@@ -47,11 +47,7 @@ std::string get_header_value(const std::string &request, const std::string &head
 
 // Function to trim whitespace from both ends of a string
 
-    const auto first = str.find_first_not_of(" \t");
-    if (first == std::string::npos) return "";
-    const auto last = str.find_last_not_of(" \t");
-    return str.substr(first, (last - first + 1));
-}
+    
 
 // Function to get the request path from the HTTP request
 std::string get_path(const std::string &request) {
