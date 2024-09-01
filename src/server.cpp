@@ -79,6 +79,15 @@ std::string get_user_agent(const std::string &request) {
     }
     return ""; // Return empty if User-Agent is not found
 }
+std::string get_accept_encoding(const std::string &request) {
+    std::vector<std::string> lines = split_message(request, "\r\n");
+    for (const auto &line : lines) {
+        if (line.find("Accept-Encoding:") == 0) {
+            return trim(line.substr(strlen("Accept-Encoding:"))); // Trim whitespace
+        }
+    }
+    return ""; // Return empty if Accept-Encoding is not found
+}
 
 // Function to handle client requests
 void handle_client(int client_fd, const std::string &directory) {
@@ -96,16 +105,31 @@ void handle_client(int client_fd, const std::string &directory) {
         std::string method = get_method(request);
         std::string user_agent = get_user_agent(request); // Declare and initialize user_agent
         std::vector<std::string> split_paths = split_message(path, "/");
-        
+          std::string accept_encoding = get_accept_encoding(request);
         std::string response;
         if (method == "GET") {
             if (path == "/") {
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, World!";
+                if (accept_encoding.find("gzip") != std::string::npos) {
+                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
+                }
+
+                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (path == "/user-agent") {
                 // Respond with the User-Agent
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(user_agent.length()) + "\r\n\r\n" + user_agent;
+                if (accept_encoding.find("gzip") != std::string::npos) {
+                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
+                }
+
+                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "echo") {
                 response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(split_paths[2].length()) + "\r\n\r\n" + split_paths[2];
+                if (accept_encoding.find("gzip") != std::string::npos) {
+                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
+                }
+
+                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
             } else if (split_paths.size() > 1 && split_paths[1] == "files") {
                 // Handle GET requests for files
                 std::string filename = split_paths[2]; // Get the filename
@@ -124,6 +148,11 @@ void handle_client(int client_fd, const std::string &directory) {
                         std::string file_content(size, '\0');
                         if (file.read(&file_content[0], size)) {
                             response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n" + file_content;
+                            if (accept_encoding.find("gzip") != std::string::npos) {
+                    response += "Content-Encoding: gzip\r\n"; // Indicate that the response is compressed
+                }
+
+                response += "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
                         }
                     }
                 } else {
