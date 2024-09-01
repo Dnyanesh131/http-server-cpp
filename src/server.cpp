@@ -90,7 +90,7 @@ void handle_client(int client_fd, const std::string &directory) {
 
         std::string path = get_path(request);
         std::string method = get_method(request);
-        std::string user_agent = get_user_agent(request);
+        
         std::vector<std::string> split_paths = split_message(path, "/");
         
         std::string response;
