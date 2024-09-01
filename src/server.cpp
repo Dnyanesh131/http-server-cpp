@@ -10,18 +10,18 @@
 #include <vector>
 #include <sstream>
 #include <thread>
+#include <zlib.h>
 #include <fstream>
 #include <sys/stat.h>
-#include <filesystem>
-#include <algorithm>
-#include <zlib.h> // Include zlib for gzip compression
-
+#include <filesystem> // C++17 for filesystem support
+#include <algorithm> 
+ // For std::find
 namespace fs = std::filesystem;
 
 // Function to split a message based on a delimiter
 std::vector<std::string> split_message(const std::string &message, const std::string& delim) {
     std::vector<std::string> toks;
-    std::stringstream ss(message);
+    std::stringstream ss = std::stringstream{message};
     std::string line;
     while (getline(ss, line, *delim.begin())) {
         toks.push_back(line);
@@ -29,14 +29,12 @@ std::vector<std::string> split_message(const std::string &message, const std::st
     }
     return toks;
 }
-// Function to trim whitespace from both ends of a string
 std::string trim(const std::string &str) {
     const auto first = str.find_first_not_of(" \t");
     if (first == std::string::npos) return "";
     const auto last = str.find_last_not_of(" \t");
     return str.substr(first, (last - first + 1));
 }
-
 // Function to get the value of a header from the request
 std::string get_header_value(const std::string &request, const std::string &header_name) {
     std::vector<std::string> lines = split_message(request, "\r\n");
@@ -48,6 +46,7 @@ std::string get_header_value(const std::string &request, const std::string &head
     return "";
 }
 
+// Function to trim whitespace from both ends of a string
 
 
 // Function to get the request path from the HTTP request
@@ -76,17 +75,23 @@ std::string get_request_body(const std::string &request) {
     size_t pos = request.find(delimiter);
     return (pos == std::string::npos) ? "" : request.substr(pos + delimiter.length());
 }
-
-// Function to compress data using gzip
-std::string gzip_compress(const std::string &data) {
+std::string compress_gzip(const std::string &data) {
+    // Allocate enough memory for the compressed data
     uLongf compressed_size = compressBound(data.size());
-    std::string compressed_data(compressed_size, '\0');
-    if (compress(reinterpret_cast<Bytef*>(&compressed_data[0]), &compressed_size,
-                 reinterpret_cast<const Bytef*>(data.data()), data.size()) != Z_OK) {
-        return ""; // Compression failed
+    std::vector<Bytef> compressed_data(compressed_size);
+
+    // Perform compression using zlib
+    int res = compress(compressed_data.data(), &compressed_size, reinterpret_cast<const Bytef *>(data.c_str()), data.size());
+    
+    // Check if compression was successful
+    if (res != Z_OK) {
+        std::cerr << "Error during compression: " << res << std::endl;
+        return "";
     }
-    compressed_data.resize(compressed_size);
-    return compressed_data;
+
+    // Convert to string and resize to actual compressed data size
+    std::string compressed(compressed_data.begin(), compressed_data.begin() + compressed_size);
+    return compressed;
 }
 
 // Function to handle client requests
@@ -106,35 +111,27 @@ void handle_client(int client_fd, const std::string &directory) {
         std::string method = get_method(request);
         std::string accept_encoding = get_header_value(request, "Accept-Encoding: ");
 
-        // Determine response headers
+        // Determine response headers and body
         std::string response;
         std::string content_encoding;
-        std::string response_body;
+        std::string body;
 
-        // Check if the client accepts gzip compression
-        if (accept_encoding.find("gzip") != std::string::npos) {
-            content_encoding = "Content-Encoding: gzip\r\n";
-        }
+        // Check if gzip compression is supported by the client
+        bool gzip_supported = accept_encoding.find("gzip") != std::string::npos;
 
         if (method == "GET") {
             if (path == "/") {
-                response_body = "Hello, World!";
-                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
+                body = "Hello, World!";
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
             } else if (path == "/user-agent") {
-                response_body = user_agent;
-                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
+                body = user_agent;
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
             } else if (path.find("/echo/") == 0) {
-                std::string echo_str = path.substr(6);
-                if (!content_encoding.empty()) {
-                    response_body = gzip_compress(echo_str);
-                    response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n" + content_encoding + "Content-Length: " + std::to_string(response_body.length()) + "\r\n\r\n";
-                } else {
-                    response_body = echo_str;
-                    response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(response_body.length()) + "\r\n\r\n" + response_body;
-                }
+                body = path.substr(6);  // Extract the part after "/echo/"
+                response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n";
             } else if (path.find("/files/") == 0) {
-                std::string filename = path.substr(7); // Get the filename
-                fs::path file_path = fs::path(directory) / filename; // Construct the full path
+                std::string filename = path.substr(7);  // Extract the filename
+                fs::path file_path = fs::path(directory) / filename;  // Construct the full path
                 if (fs::exists(file_path) && fs::is_regular_file(file_path)) {
                     std::ifstream file(file_path, std::ios::binary);
                     if (file) {
@@ -143,16 +140,11 @@ void handle_client(int client_fd, const std::string &directory) {
                         std::streamsize size = file.tellg();
                         file.seekg(0, std::ios::beg);
                         // Read the file content
-                        std::string file_content(size, '\0');
-                        if (file.read(&file_content[0], size)) {
-                            if (!content_encoding.empty()) {
-                                file_content = gzip_compress(file_content);
-                                response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n" + content_encoding + "Content-Length: " + std::to_string(file_content.length()) + "\r\n\r\n";
-                            } else {
-                                response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(size) + "\r\n\r\n";
-                            }
-                            response += file_content;
-                        }
+                        body.resize(size);
+                        file.read(&body[0], size);
+                        response = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n";
+                    } else {
+                        response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
                     }
                 } else {
                     response = "HTTP/1.1 404 Not Found\r\n\r\n";
@@ -162,8 +154,8 @@ void handle_client(int client_fd, const std::string &directory) {
             }
         } else if (method == "POST") {
             if (path.find("/files/") == 0) {
-                std::string filename = path.substr(7); // Get the filename
-                fs::path file_path = fs::path(directory) / filename; // Construct the full path
+                std::string filename = path.substr(7);  // Extract the filename
+                fs::path file_path = fs::path(directory) / filename;  // Construct the full path
                 std::string request_body = get_request_body(request);
                 size_t content_length = get_content_length(request);
                 std::ofstream file(file_path, std::ios::binary);
@@ -180,59 +172,69 @@ void handle_client(int client_fd, const std::string &directory) {
             response = "HTTP/1.1 404 Not Found\r\n\r\n";
         }
 
+        // Compress the body if gzip is supported
+        if (gzip_supported && !body.empty()) {
+            std::string compressed_body = compress_gzip(body);
+            if (!compressed_body.empty()) {
+                body = compressed_body;  // Replace the body with compressed data
+                content_encoding = "Content-Encoding: gzip\r\n";
+            }
+        }
+
+        // Finalize the response with the proper headers
+        response += content_encoding + "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+
         std::cout << "Response: " << response << std::endl;
         write(client_fd, response.c_str(), response.length());
     }
     close(client_fd); // Close the client socket
 }
 
-int main(int argc, char **argv) {
-    if (argc != 2) {
-        std::cerr << "Usage: " << argv[0] << " <directory>" << std::endl;
-        return EXIT_FAILURE;
-    }
-    
-    std::string directory = argv[1];
-    
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == -1) {
-        std::cerr << "Error creating socket: " << strerror(errno) << std::endl;
-        return EXIT_FAILURE;
-    }
-    
-    std::cout << "Socket created successfully" << std::endl;
 
-    sockaddr_in server_addr = {};
+
+int main(int argc, char **argv) {
+    std::string directory = "."; // Default directory
+    if (argc > 2 && std::string(argv[1]) == "--directory") {
+        directory = argv[2]; // Get the directory from command line
+    }
+    std::cout << "Logs from your program will appear here!\n";
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        std::cerr << "Failed to create server socket\n";
+        return 1;
+    }
+    // Set socket options to avoid 'Address already in use' errors
+    int reuse = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
+        std::cerr << "setsockopt failed\n";
+        return 1;
+    }
+    struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
     server_addr.sin_port = htons(4221);
-
-    std::cout << "Binding to port 4221..." << std::endl;
-    if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
-        std::cerr << "Bind failed: " << strerror(errno) << std::endl;
-        close(server_fd);
-        return EXIT_FAILURE;
+    if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
+        std::cerr << "Failed to bind to port 4221\n";
+        return 1;
     }
-    
-    std::cout << "Listening on port 4221..." << std::endl;
-    if (listen(server_fd, 10) < 0) {
-        std::cerr << "Listen failed: " << strerror(errno) << std::endl;
-        close(server_fd);
-        return EXIT_FAILURE;
+    int connection_backlog = 5;
+    if (listen(server_fd, connection_backlog) != 0) {
+        std::cerr << "listen failed\n";
+        return 1;
     }
-
-    std::cout << "Server listening on port 4221..." << std::endl;
-
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    std::cout << "Waiting for a client to connect...\n";
     while (true) {
-        int client_fd = accept(server_fd, nullptr, nullptr);
+        int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
         if (client_fd < 0) {
-            std::cerr << "Accept failed: " << strerror(errno) << std::endl;
-            continue;
+            std::cerr << "Error in accepting client" << std::endl;
+            continue; // Continue to accept other connections
         }
-
-        std::thread(handle_client, client_fd, directory).detach();
+        std::cout << "Client connected\n";
+        // Create a new thread to handle the client request
+        std::thread(handle_client, client_fd, directory).detach(); // Detach the thread to allow concurrent handling
     }
-
     close(server_fd);
-    return EXIT_SUCCESS;
+    return 0;
 }
